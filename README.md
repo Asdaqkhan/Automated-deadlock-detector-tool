@@ -21,7 +21,7 @@ A web-based interactive tool for visualizing and detecting deadlocks in resource
 * [How It Works](#-how-it-works)
 * [Project Structure](#-project-structure)
 * [Contributing](#-contributing)
-* [License](#-license)
+* [License](#-https://github.com/Asdaqkhan/Automated-deadlock-detector-tool/blob/main/LICENSE)
 * [Contact](#-contact)
 
 ## ✨ Features
