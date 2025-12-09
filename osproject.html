@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Deadlock Detection Tool</title>
+  <style>
+    :root {
+      --primary: #2563eb; --danger: #ef4444; --success: #10b981;
+      --dark: #1f2937; --light: #f3f4f6;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0; padding: 20px; min-height: 100vh; color: #1f2937;
+    }
+    .container {
+      max-width: 1100px; margin: 0 auto; background: white;
+      border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+      overflow: hidden;
+    }
+    header {
+      background: var(--primary); color: white; padding: 2rem; text-align: center;
+    }
+    h1 { margin: 0; font-size: 2.4rem; }
+    h2 { color: var(--primary); border-bottom: 3px solid #e5e7eb; padding-bottom: 10px; margin-top: 30px; }
+    .main { padding: 2rem; }
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+    }
+    button {
+      padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer;
+      font-weight: bold; transition: all 0.3s; font-size: 1rem;
+    }
+    button:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-success { background: var(--success); color: white; }
+    .btn-danger { background: var(--danger); color: white; }
+
+    .input-group {
+      display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin: 20px 0;
+    }
+    label { font-weight: 600; min-width: 160px; }
+    input, select {
+      padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; width: 100px;
+    }
+
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; background: #f9fafb; }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: center; }
+    th { background: var(--primary); color: white; }
+    td input { width: 60px; text-align: center; border: none; background: transparent; }
+    .allocation { background: #dbeafe; }
+    .request { background: #fef3c7; }
+
+    .graph-container {
+      margin: 30px 0; text-align: center; position: relative;
+    }
+    #graph {
+      width: 100%; height: 450px; border: 2px solid #e5e7eb; border-radius: 12px;
+      background: #fafafa; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .loading {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-size: 1.3em; color: #666; background: white; padding: 20px 40px;
+      border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+
+    .result {
+      padding: 20px; border-radius: 10px; margin: 25px 0; font-size: 1.2rem;
+      text-align: center; min-height: 60px; font-weight: bold;
+    }
+    .safe { background: #d1fae5; border: 3px solid var(--success); color: #065f46; }
+    .deadlock-result { background: #fee2e2; border: 3px solid var(--danger); color: #991b1b; }
+
+    #resolution { display: none; background: #f0f9ff; padding: 20px; border-radius: 12px; margin-top: 20px; }
+    #suggestions { padding-left: 20px; line-height: 2; }
+
+    footer {
+      text-align: center; padding: 20px; background: #1f2937; color: #9ca3af; font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Automated Deadlock Detection Tool</h1>
+      <p>Detect circular waits in resource allocation — instantly and visually!</p>
+    </header>
+
+    <div class="main">
+      <div class="controls">
+        <button class="btn-primary" onclick="addProcess()">+ Add Process</button>
+        <button class="btn-primary" onclick="addResource()">+ Add Resource</button>
+        <button class="btn-success" onclick="detectDeadlock()">Detect Deadlock</button>
+        <button class="btn-danger" onclick="clearAll()">Clear All</button>
+      </div>
+
+      <div class="input-group">
+        <label>Number of Processes:</label>
+        <input type="number" id="numProcesses" min="1" value="3"/>
+        <label>Number of Resources:</label>
+        <input type="number" id="numResources" min="1" value="3"/>
+        <button class="btn-primary" onclick="initSystem()">Apply Changes</button>
+      </div>
+
+      <h2>Allocation Matrix (What processes currently hold)</h2>
+      <div id="allocationTable"></div>
+
+      <h2>Request Matrix (What processes still need)</h2>
+      <div id="requestTable"></div>
+
+      <h2>Resource Allocation Graph</h2>
+      <div class="graph-container">
+        <div id="loading" class="loading">Loading graph engine...</div>
+        <div id="graph"></div>
+      </div>
+
+      <h2>Detection Result</h2>
+      <div id="result" class="result">Click "Detect Deadlock" to analyze the system.</div>
+
+      <div id="resolution">
+        <h2>Suggested Resolution Strategies</h2>
+        <ul id="suggestions"></ul>
+      </div>
+    </div>
+
+    <footer>
+      Deadlock Detection Tool © 2025 | Made with HTML, CSS & JavaScript
+    </footer>
+  </div>
+
+  <!-- Load vis-network only when needed -->
+  <script>
+    let processes = 3, resources = 3;
+    let allocation = [], request = [];
+    let network = null;
+
+    // Load vis.js safely
+    function loadVisNetwork() {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/vis-network@9.1.2/standalone/umd/vis-network.min.js';
+      script.onload = () => {
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("graph").style.display = "block";
+        initSystem();
+      };
+      script.onerror = () => {
+        document.getElementById("loading").innerHTML = "Failed to load graph. <a href='' onclick='location.reload()'>Reload</a>";
+      };
+      document.head.appendChild(script);
+    }
+
+    function initSystem() {
+      processes = parseInt(document.getElementById("numProcesses").value) || 3;
+      resources = parseInt(document.getElementById("numResources").value) || 3;
+
+      allocation = Array.from({length: processes}, () => Array(resources).fill(0));
+      request = Array.from({length: processes}, () => Array(resources).fill(0));
+
+      renderTables();
+      drawGraph();
+    }
+
+    function renderAllocationTable() {
+      let html = `<table><tr><th>Process</th>`;
+      for (let j = 0; j < resources; j++) html += `<th>R${j+1}</th>`;
+      html += `</tr>`;
+      for (let i = 0; i < processes; i++) {
+        html += `<tr><td><strong>P${i+1}</strong></td>`;
+        for (let j = 0; j < resources; j++) {
+          html += `<td class="allocation"><input type="number" min="0" value="${allocation[i][j]}" 
+                   onchange="allocation[${i}][${j}]=parseInt(this.value)||0; drawGraph();"></td>`;
+        }
+        html += `</tr>`;
+      }
+      html += `</table>`;
+      document.getElementById("allocationTable").innerHTML = html;
+    }
+
+    function renderRequestTable() {
+      let html = `<table><tr><th>Process</th>`;
+      for (let j = 0; j < resources; j++) html += `<th>R${j+1}</th>`;
+      html += `</tr>`;
+      for (let i = 0; i < processes; i++) {
+        html += `<tr><td><strong>P${i+1}</strong></td>`;
+        for (let j = 0; j < resources; j++) {
+          html += `<td class="request"><input type="number" min="0" value="${request[i][j]}" 
+                   onchange="request[${i}][${j}]=parseInt(this.value)||0; drawGraph();"></td>`;
+        }
+        html += `</tr>`;
+      }
+      html += `</table>`;
+      document.getElementById("requestTable").innerHTML = html;
+    }
+
+    function renderTables() {
+      renderAllocationTable();
+      renderRequestTable();
+    }
+
+    function addProcess() {
+      processes++;
+      allocation.push(Array(resources).fill(0));
+      request.push(Array(resources).fill(0));
+      document.getElementById("numProcesses").value = processes;
+      renderTables();
+      drawGraph();
+    }
+
+    function addResource() {
+      resources++;
+      for (let i = 0; i < processes; i++) {
+        allocation[i].push(0);
+        request[i].push(0);
+      }
+      document.getElementById("numResources").value = resources;
+      renderTables();
+      drawGraph();
+    }
+
+    function clearAll() {
+      if (confirm("Clear all data?")) {
+        allocation = Array.from({length: processes}, () => Array(resources).fill(0));
+        request = Array.from({length: processes}, () => Array(resources).fill(0));
+        renderTables();
+        drawGraph();
+        document.getElementById("result").innerHTML = "Cleared! Click Detect Deadlock.";
+        document.getElementById("resolution").style.display = "none";
+      }
+    }
+
+    function hasCycle(graph) {
+      const visited = new Set();
+      const recStack = new Set();
+
+      function dfs(node) {
+        if (!visited.has(node)) {
+          visited.add(node);
+          recStack.add(node);
+          const neighbors = graph.get(node) || [];
+          for (const neighbor of neighbors) {
+            if (!visited.has(neighbor) && dfs(neighbor)) return true;
+            if (recStack.has(neighbor)) return true;
+          }
+        }
+        recStack.delete(node);
+        return false;
+      }
+
+      for (const node of graph.keys()) {
+        if (dfs(node)) return true;
+      }
+      return false;
+    }
+
+    function detectDeadlock() {
+      const graph = new Map();
+
+      // Allocation: Process → Resource
+      for (let i = 0; i < processes; i++) {
+        for (let j = 0; j < resources; j++) {
+          if (allocation[i][j] > 0) {
+            const from = `P${i+1}`;
+            const to = `R${j+1}`;
+            if (!graph.has(from)) graph.set(from, []);
+            graph.get(from).push(to);
+          }
+        }
+      }
+
+      // Request: Resource → Process
+      for (let i = 0; i < processes; i++) {
+        for (let j = 0; j < resources; j++) {
+          if (request[i][j] > 0) {
+            const from = `R${j+1}`;
+            const to = `P${i+1}`;
+            if (!graph.has(from)) graph.set(from, []);
+            graph.get(from).push(to);
+          }
+        }
+      }
+
+      const deadlock = hasCycle(graph);
+      const resultDiv = document.getElementById("result");
+      const resDiv = document.getElementById("resolution");
+
+      if (deadlock) {
+        resultDiv.className = "result deadlock-result";
+        resultDiv.innerHTML = `DEADLOCK DETECTED!<br>A circular wait exists. System is stuck!`;
+        resDiv.style.display = "block";
+        document.getElementById("suggestions").innerHTML = `
+          <li><strong>Preemption:</strong> Take resource from a process</li>
+          <li><strong>Terminate Process:</strong> Kill one or more processes</li>
+          <li><strong>Rollback:</strong> Restore to a previous safe state</li>
+          <li><strong>Add Resources:</strong> Increase available instances</li>
+        `;
+      } else {
+        resultDiv.className = "result safe";
+        resultDiv.innerHTML = `System is SAFE<br>No deadlock found. All processes can finish.`;
+        resDiv.style.display = "none";
+      }
+
+      drawGraph();
+    }
+
+    function drawGraph() {
+      if (typeof vis === "undefined") return;
+
+      if (network) network.destroy();
+
+      const container = document.getElementById("graph");
+      const nodes = new vis.DataSet();
+      const edges = new vis.DataSet();
+
+      for (let i = 0; i < processes; i++) {
+        nodes.add({ id: `P${i+1}`, label: `P${i+1}`, shape: "box", color: "#93c5fd" });
+      }
+      for (let j = 0; j < resources; j++) {
+        nodes.add({ id: `R${j+1}`, label: `R${j+1}`, shape: "ellipse", color: "#fca5a5" });
+      }
+
+      for (let i = 0; i < processes; i++) {
+        for (let j = 0; j < resources; j++) {
+          if (allocation[i][j] > 0) {
+            edges.add({ from: `P${i+1}`, to: `R${j+1}`, label: allocation[i][j], arrows: "to", color: "#1d4ed8", width: 3 });
+          }
+          if (request[i][j] > 0) {
+            edges.add({ from: `R${j+1}`, to: `P${i+1}`, label: request[i][j], arrows: "to", dashes: true, color: "#dc2626", width: 3 });
+          }
+        }
+      }
+
+      const data = { nodes, edges };
+      const options = {
+        physics: { enabled: true, stabilization: { iterations: 150 } },
+        layout: { improvedLayout: true },
+        nodes: { font: { size: 20 } },
+        edges: { font: { align: "middle", size: 16 }, smooth: true }
+      };
+
+      network = new vis.Network(container, data, options);
+      setTimeout(() => network && network.fit(), 600);
+    }
+
+    // Start everything
+    window.onload = loadVisNetwork;
+  </script>
+</body>
+</html>
